@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<web-app
+        xmlns="http://java.sun.com/xml/ns/j2ee"
+        version="2.4"
+>
+    <display-name>Gupao web application</display-name>
+    <servlet>
+        <servlet-name>gpmvc</servlet-name>
+        <servlet-class>com.example.mvcframework.servlet.GPDispacherServelet</servlet-class>
+        <init-param>
+            <param-name>contextConfigLocation</param-name>
+            <param-value>application.properties</param-value>
+        </init-param>
+        <load-on-startup>1</load-on-startup>
+
+    </servlet>
+    <servlet-mapping>
+        <servlet-name>gpmvc</servlet-name>
+        <!--用一个sevlet拦截所有请求 -->
+        <url-pattern>/*</url-pattern>
+    </servlet-mapping>
+</web-app>
