@@ -1,6 +1,9 @@
 package com.example.mvcframework.servlet;
 
+import com.example.mvcframework.annotation.GPAutowired;
 import com.example.mvcframework.annotation.GPController;
+import com.example.mvcframework.annotation.GPRequestMapping;
+import com.example.mvcframework.annotation.GPService;
 
 import javax.servlet.ServletConfig;
 import javax.servlet.ServletException;
@@ -10,6 +13,8 @@ import javax.servlet.http.HttpServletResponse;
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
+import java.lang.reflect.Field;
+import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.net.URL;
 import java.util.*;
@@ -73,10 +78,69 @@ public class GPDispacherServelet extends HttpServlet {
 
     }
 
+    //    initHandlerMapping()方法，将GPRequestMapping中配置的信息和Method进行关联，并保存这些关系。
     private void initHandlerMapping() {
+        if (ioc.isEmpty()) {
+            return;
+        }
+        for (Map.Entry entry : ioc.entrySet()) {
+            Class<?> clazz = entry.getValue().getClass();
+            if (!clazz.isAnnotationPresent(GPController.class)) {
+                continue;
+            } else {
+                String baseUtrl = "";
+                if (clazz.isAnnotationPresent(GPRequestMapping.class)) {
+                    GPRequestMapping requestMapping = clazz.getAnnotation(GPRequestMapping.class);
+                    baseUtrl = requestMapping.value();
+                }
+                Method[] methods = clazz.getMethods();
+                for (Method method : methods) {
+                    //没有RequestMapping注解的直接忽略
+                    if (!method.isAnnotationPresent(GPRequestMapping.class)) {
+                        continue;
+                    } else {
+                        //映射url
+                        GPRequestMapping requestMapping = method.getAnnotation(GPRequestMapping.class);
+                        String url = ("/" + baseUtrl + "/" + requestMapping.value()).replaceAll("/+", "/");
+                        handleMapping.put(url, method);
+                        System.out.println("mapped" + url + "," + method);
+                    }
+                }
+
+            }
+        }
+
+
     }
 
     private void doAutoWired() {
+        if (ioc.isEmpty()) {
+            return;
+        }
+
+        for (Map.Entry entry : ioc.entrySet()) {
+            Field[] fields = entry.getValue().getClass().getDeclaredFields();
+            for (Field field : fields) {
+                if (!field.isAnnotationPresent(GPAutowired.class)) {
+                    continue;
+                }
+                GPAutowired autowired = field.getAnnotation(GPAutowired.class);
+                String beanName = autowired.value().trim();
+                if ("".equals(beanName)) {
+                    beanName = field.getType().getName();
+                }
+                field.setAccessible(true);
+                try {
+                    field.set(entry.getKey(), ioc.get(beanName));
+                } catch (IllegalAccessException e) {
+                    e.printStackTrace();
+                }
+
+
+            }
+
+        }
+
     }
 
     private void doInstance() {
@@ -85,12 +149,27 @@ public class GPDispacherServelet extends HttpServlet {
         }
         try {
             for (String className : classNames) {
-                Class clazz = Class.forName(className);
+                Class<?> clazz = Class.forName(className);
                 if (clazz.isAnnotationPresent(GPController.class)) {
                     //默认首字母小写
                     String beanName = lowerFirstCase(clazz.getSimpleName());
                     ioc.put(beanName, clazz.newInstance());
-                }else if(clazz.isAnnotationPresent(GPS)){
+                } else if (clazz.isAnnotationPresent(GPService.class)) {
+                    GPService service = clazz.getAnnotation(GPService.class);
+                    String beanName = service.value();
+                    //如果用户设置了名字，用户自己设置
+                    if (!"".equals(beanName.trim())) {
+                        ioc.put(beanName, clazz.newInstance());
+                        continue;
+                    } else {
+
+                        Class<?>[] interfaces = clazz.getInterfaces();
+                        for (Class in :
+                                interfaces) {
+                            ioc.put(in.getName(), in.newInstance());
+                        }
+
+                    }
 
                 }
             }
@@ -142,8 +221,14 @@ public class GPDispacherServelet extends HttpServlet {
 
 
     @Override
-    protected void doPost(HttpServletRequest req, HttpServletResponse resp) throws ServletException, IOException {
-        super.doPost(req, resp);
+    protected void doPost(HttpServletRequest req, HttpServletResponse resp) throws  IOException {
+
+        try {
+            doDispatch(req, resp);
+
+        } catch (Exception e) {
+            resp.getWriter().write("500 Excption,Details:\r\n" + Arrays.toString(e.getStackTrace()));
+        }
     }
 
 
@@ -151,6 +236,24 @@ public class GPDispacherServelet extends HttpServlet {
         char[] chars = str.toCharArray();
         chars[0] += 32;
         return String.copyValueOf(chars);
+    }
+
+    private void doDispatch(HttpServletRequest req, HttpServletResponse resp) throws IOException, InvocationTargetException, IllegalAccessException {
+        if (handleMapping.isEmpty()) {
+            return;
+        }
+
+        String url = req.getRequestURI();
+        String contextPath = req.getContextPath();
+        url = url.replaceAll(contextPath, "").replaceAll("/+", "/");
+        if (!handleMapping.containsKey(url)) {
+            resp.getWriter().write("404 not fond");
+            return;
+        }
+        Map<String, String[]> params = req.getParameterMap();
+        Method method = handleMapping.get(url);
+        String beanName = lowerFirstCase(method.getDeclaringClass().getSimpleName());
+        method.invoke(ioc.get(beanName), req, resp, params.get("name")[0]);
     }
 
 }
